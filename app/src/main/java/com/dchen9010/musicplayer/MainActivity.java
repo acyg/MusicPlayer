@@ -1,6 +1,8 @@
 package com.dchen9010.musicplayer;
 
 import android.Manifest;
+import android.app.Notification;
+import android.app.PendingIntent;
 import android.content.ComponentName;
 import android.content.ContentResolver;
 import android.content.ContentUris;
@@ -9,7 +11,8 @@ import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
-import android.media.MediaScannerConnection;
+import android.graphics.Color;
+import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.IBinder;
@@ -20,22 +23,25 @@ import android.support.v4.widget.DrawerLayout;
 import android.support.v7.app.ActionBarDrawerToggle;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
+import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.ListView;
+import android.widget.MediaController;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 
 public class MainActivity extends AppCompatActivity
-        implements NavigationView.OnNavigationItemSelectedListener {
-    private ArrayList<Song> songList;
+        implements NavigationView.OnNavigationItemSelectedListener, MediaController.MediaPlayerControl {
+    private ArrayList<SongMeta> songList;
     private ListView songView;
     private MusicService musicSvc;
     private Intent playIntent;
     private boolean musicBound = false;
+    private MusicController controller;
 
     private final static int MY_PERMISSION_REQUEST_READ_EXTERNAL_STORAGE = 0;
     private final static int MY_PERMISSION_REQUEST_WAKE_LOCK = 1;
@@ -45,13 +51,30 @@ public class MainActivity extends AppCompatActivity
         public void onServiceConnected(ComponentName name, IBinder service) {
             musicSvc = ((MusicService.MusicBinder) service).getService();
             musicSvc.setList(songList);
+            setController();
+
+            musicSvc.getPlayer().setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
+                @Override
+                public void onPrepared(MediaPlayer mp) {
+                    try{
+                        musicSvc.onPrepared(mp);
+                    } catch(Exception e) {
+                        Log.i("MusicConnection", "Service does not implement onPreparedListener");
+                    }
+
+                    controller.show();
+                    selectSongView(musicSvc.getPlaying());
+
+
+                }
+            });
+
             musicBound = true;
         }
 
         @Override
         public void onServiceDisconnected(ComponentName name) {
             musicBound = false;
-
         }
     };
 
@@ -72,27 +95,31 @@ public class MainActivity extends AppCompatActivity
         navigationView.setNavigationItemSelectedListener(this);
 
         songView = (ListView) findViewById(R.id.song_list);
-        songList = new ArrayList<Song>();
+        songList = new ArrayList<SongMeta>();
 
-
-        if(checkSelfPermission(Manifest.permission.WAKE_LOCK) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.WAKE_LOCK}, MY_PERMISSION_REQUEST_WAKE_LOCK);
+        if(checkSelfPermission(Manifest.permission.WAKE_LOCK)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.WAKE_LOCK},
+                    MY_PERMISSION_REQUEST_WAKE_LOCK);
         }
 
-        if(checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, MY_PERMISSION_REQUEST_READ_EXTERNAL_STORAGE);
-        } else addToSongList(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI);
+        if(checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE},
+                    MY_PERMISSION_REQUEST_READ_EXTERNAL_STORAGE);
+        }
+        else addToSongList(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI);
 
         addToSongList(MediaStore.Audio.Media.INTERNAL_CONTENT_URI);
 
-        Collections.sort(songList, new Comparator<Song>() {
-            public int compare(Song a, Song b) {
+        Collections.sort(songList, new Comparator<SongMeta>() {
+            public int compare(SongMeta a, SongMeta b) {
                 return a.getTitle().compareTo(b.getTitle());
             }
         });
 
-        SongAdapter songApt = new SongAdapter(this, songList);
-        songView.setAdapter(songApt);
+        SongAdapter songAdpt = new SongAdapter(this, songList);
+        songView.setAdapter(songAdpt);
     }
 
     @Override
@@ -104,7 +131,6 @@ public class MainActivity extends AppCompatActivity
             bindService(playIntent, musicConnection, Context.BIND_AUTO_CREATE);
             //startService(playIntent);
         }
-
     }
 
     @Override
@@ -123,8 +149,8 @@ public class MainActivity extends AppCompatActivity
 
             addToSongList(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI);
 
-            Collections.sort(songList, new Comparator<Song>() {
-                public int compare(Song a, Song b) {
+            Collections.sort(songList, new Comparator<SongMeta>() {
+                public int compare(SongMeta a, SongMeta b) {
                     return a.getTitle().compareTo(b.getTitle());
                 }
             });
@@ -134,8 +160,25 @@ public class MainActivity extends AppCompatActivity
         }
     }
 
+    public void selectSongView(int pos) {
+        SongAdapter adpt = (SongAdapter) songView.getAdapter();
+        int priorSelected = adpt.getSelected();
+        adpt.setSelected(pos);
+
+        int firstVisiblePosition = songView.getFirstVisiblePosition();
+        int targetVisiblePosition = priorSelected - firstVisiblePosition;
+        if(targetVisiblePosition >= 0 && targetVisiblePosition < songView.getChildCount())
+            songView.getChildAt(targetVisiblePosition).setBackgroundColor(0);
+
+        targetVisiblePosition = pos - firstVisiblePosition;
+        if(targetVisiblePosition >= 0 && targetVisiblePosition < songView.getChildCount())
+            songView.getChildAt(targetVisiblePosition).setBackgroundColor(Color.DKGRAY);
+    }
+
     public void selectSong(View view) {
-        musicSvc.setSong((int) view.getTag());
+        int selectIndex = (int) view.getTag();
+        selectSongView(selectIndex);
+        musicSvc.setSong(selectIndex);
         musicSvc.playSong();
     }
 
@@ -151,13 +194,25 @@ public class MainActivity extends AppCompatActivity
                     (MediaStore.Audio.Media._ID);
             int artistColumn = musicCursor.getColumnIndex
                     (MediaStore.Audio.Media.ARTIST);
+            int durationColumn = musicCursor.getColumnIndex
+                    (MediaStore.Audio.Media.DURATION);
+            int albumColumn = musicCursor.getColumnIndex
+                    (MediaStore.Audio.Media.ALBUM);
 
             do {
                 long Id = musicCursor.getLong(idColumn);
+                int Duration = musicCursor.getInt(durationColumn);
                 String Title = musicCursor.getString(titleColumn);
                 String Artist = musicCursor.getString(artistColumn);
+                String Album = musicCursor.getString(albumColumn);
                 Uri contentUri = ContentUris.withAppendedId(targetUri, Id);
-                songList.add(new Song(Id, Title, Artist, contentUri));
+                songList.add(new SongMeta(
+                        Id,
+                        Duration,
+                        Title,
+                        Artist,
+                        Album,
+                        contentUri));
             } while(musicCursor.moveToNext());
         }
     }
@@ -225,5 +280,91 @@ public class MainActivity extends AppCompatActivity
         DrawerLayout drawer = (DrawerLayout) findViewById(R.id.drawer_layout);
         drawer.closeDrawer(GravityCompat.START);
         return true;
+    }
+
+    private void setController() {
+        controller = new MusicController(this);
+        controller.setPrevNextListeners(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                musicSvc.playNext();
+            }
+        }, new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                musicSvc.playPrev();
+            }
+        });
+
+        controller.setMediaPlayer(this);
+        controller.setAnchorView((View) findViewById(R.id.song_list));
+        controller.setEnabled(true);
+    }
+
+    public void playPrev() {
+
+        musicSvc.playPrev();
+    }
+
+    public void playNext() {
+
+        musicSvc.playNext();
+    }
+
+    @Override
+    public void start() {
+        musicSvc.start();
+    }
+
+    @Override
+    public void pause() {
+        musicSvc.pause();
+    }
+
+    @Override
+    public int getDuration() {
+        //Log.d("dur", Integer.toString(songDur));
+        return musicSvc.getDuration();//songDur;
+    }
+
+    @Override
+    public int getCurrentPosition() {
+        //Log.d("pos", Integer.toString(player.getCurrentPosition()));
+        return musicSvc.getCurrentPosition();
+    }
+
+    @Override
+    public void seekTo(int pos) {
+        musicSvc.seekTo(pos);
+    }
+
+    @Override
+    public boolean isPlaying() {
+        return musicSvc.isPlaying();
+    }
+
+    @Override
+    public int getBufferPercentage() {
+        return 0;
+    }
+
+    @Override
+    public boolean canPause() {
+        return true;
+    }
+
+    @Override
+    public boolean canSeekBackward() {
+        return true;
+    }
+
+    @Override
+    public boolean canSeekForward() {
+        return true;
+    }
+
+    @Override
+    public int getAudioSessionId() {
+        return 0;
     }
 }

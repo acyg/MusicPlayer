@@ -1,5 +1,7 @@
 package com.dchen9010.musicplayer;
 
+import android.app.Notification;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
 import android.media.AudioManager;
@@ -12,12 +14,14 @@ import android.util.Log;
 import java.util.ArrayList;
 
 public class MusicService extends Service implements
-        MediaPlayer.OnPreparedListener, MediaPlayer.OnErrorListener,
-        MediaPlayer.OnCompletionListener {
+        MediaPlayer.OnErrorListener,
+        MediaPlayer.OnPreparedListener,
+        MediaPlayer.OnCompletionListener{
     private MediaPlayer player;
-    private ArrayList<Song> songs;
+    private ArrayList<SongMeta> songs;
     private int songNum;
     private final IBinder musicBinder = new MusicBinder();
+    private static final int NOTIFY_ID = 1;
 
     @Override
     public void onCreate() {
@@ -29,23 +33,28 @@ public class MusicService extends Service implements
         initMediaPlayer();
     }
 
+    @Override
+    public void onDestroy() {
+        stopForeground(true);
+    }
+
     public void initMediaPlayer() {
         player.setWakeMode(getApplicationContext(),
                 PowerManager.PARTIAL_WAKE_LOCK);
         player.setAudioStreamType(AudioManager.STREAM_MUSIC);
 
-        player.setOnPreparedListener(this);
         player.setOnCompletionListener(this);
         player.setOnErrorListener(this);
+        player.setOnPreparedListener(this);
     }
 
-    public void setList(ArrayList<Song> songs) {
+    public void setList(ArrayList<SongMeta> songs) {
         this.songs = songs;
     }
 
     public void playSong() {
+        SongMeta song = songs.get(songNum);
         player.reset();
-        Song song = songs.get(songNum);
 
         try{
             player.setDataSource(getApplicationContext(), song.getContentUri());
@@ -56,24 +65,48 @@ public class MusicService extends Service implements
         player.prepareAsync();
     }
 
-    @Override
-    public void onPrepared(MediaPlayer player) {
-        player.start();
+    public MediaPlayer getPlayer() {
+        return player;
+    }
+
+    public int getPlaying() {
+        return songNum;
     }
 
     @Override
     public void onCompletion(MediaPlayer player) {
-
+        playNext();
     }
 
     @Override
     public boolean onError(MediaPlayer player, int a, int b) {
-
+        player.reset();
         return false;
     }
 
     public void setSong(int songIndex) {
         songNum = songIndex;
+    }
+
+    @Override
+    public void onPrepared(MediaPlayer mp) {
+        mp.start();
+
+        Intent notiIntent = new Intent(this, MainActivity.class);
+        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notiIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+
+        Notification.Builder builder = new Notification.Builder(this);
+
+        String songTitle = songs.get(songNum).getTitle();
+        builder.setContentIntent(pendingIntent)
+                .setSmallIcon(R.drawable.ic_menu_camera)
+                .setTicker(songTitle)
+                .setOngoing(true)
+                .setContentTitle("Playing")
+                .setContentText(songTitle);
+        Notification noti = builder.build();
+
+        startForeground(NOTIFY_ID, noti);
     }
 
     public class MusicBinder extends Binder {
@@ -94,4 +127,43 @@ public class MusicService extends Service implements
         return false;
     }
 
+    public void playPrev() {
+
+        if(songNum == 0) songNum = songs.size() - 1;
+        else songNum--;
+        playSong();
+    }
+
+    public void playNext() {
+
+        if(songNum < songs.size() - 1) songNum++;
+        else songNum = 0;
+        playSong();
+    }
+
+    public void start() {
+        player.start();
+    }
+
+    public void pause() {
+        player.pause();
+    }
+
+    public int getDuration() {
+        //Log.d("dur", Integer.toString(songDur));
+        return songs.get(songNum).getDuration();
+    }
+
+    public int getCurrentPosition() {
+        //Log.d("pos", Integer.toString(player.getCurrentPosition()));
+        return player.getCurrentPosition();
+    }
+
+    public void seekTo(int pos) {
+        player.seekTo(pos);
+    }
+
+    public boolean isPlaying() {
+        return player.isPlaying();
+    }
 }
