@@ -1,12 +1,15 @@
 package com.dchen9010.musicplayer;
 
 import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.os.Binder;
+import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
 import android.util.Log;
@@ -22,6 +25,7 @@ public class MusicService extends Service implements
     private int songNum;
     private final IBinder musicBinder = new MusicBinder();
     private static final int NOTIFY_ID = 1;
+    private static final String CHANNEL_ID = "com.dchen9010.musicplayer.Service";
 
     @Override
     public void onCreate() {
@@ -31,6 +35,20 @@ public class MusicService extends Service implements
         player = new MediaPlayer();
 
         initMediaPlayer();
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Create the NotificationChannel
+            CharSequence name = getString(R.string.channel_name);
+            String description = getString(R.string.channel_description);
+            int importance = NotificationManager.IMPORTANCE_NONE;
+            NotificationChannel mChannel = new NotificationChannel(CHANNEL_ID, name, importance);
+            mChannel.setDescription(description);
+            // Register the channel with the system; you can't change the importance
+            // or other notification behaviors after this
+            NotificationManager notificationManager = (NotificationManager) getSystemService(
+                    NOTIFICATION_SERVICE);
+            notificationManager.createNotificationChannel(mChannel);
+        }
     }
 
     @Override
@@ -88,6 +106,7 @@ public class MusicService extends Service implements
         songNum = songIndex;
     }
 
+
     @Override
     public void onPrepared(MediaPlayer mp) {
         mp.start();
@@ -97,6 +116,8 @@ public class MusicService extends Service implements
 
         Notification.Builder builder = new Notification.Builder(this);
 
+
+
         String songTitle = songs.get(songNum).getTitle();
         builder.setContentIntent(pendingIntent)
                 .setSmallIcon(R.drawable.ic_menu_camera)
@@ -104,6 +125,11 @@ public class MusicService extends Service implements
                 .setOngoing(true)
                 .setContentTitle("Playing")
                 .setContentText(songTitle);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            builder.setChannelId(CHANNEL_ID);
+        }
+
         Notification noti = builder.build();
 
         startForeground(NOTIFY_ID, noti);

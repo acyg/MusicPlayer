@@ -1,8 +1,6 @@
 package com.dchen9010.musicplayer;
 
 import android.Manifest;
-import android.app.Notification;
-import android.app.PendingIntent;
 import android.content.ComponentName;
 import android.content.ContentResolver;
 import android.content.ContentUris;
@@ -22,12 +20,13 @@ import android.support.v4.view.GravityCompat;
 import android.support.v4.widget.DrawerLayout;
 import android.support.v7.app.ActionBarDrawerToggle;
 import android.support.v7.app.AppCompatActivity;
+import android.support.v7.widget.LinearLayoutManager;
+import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.Toolbar;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
-import android.widget.ListView;
 import android.widget.MediaController;
 
 import java.util.ArrayList;
@@ -37,16 +36,23 @@ import java.util.Comparator;
 public class MainActivity extends AppCompatActivity
         implements NavigationView.OnNavigationItemSelectedListener, MediaController.MediaPlayerControl {
     private ArrayList<SongMeta> songList;
-    private ListView songView;
+    private RecyclerView songView;
     private MusicService musicSvc;
     private Intent playIntent;
     private boolean musicBound = false;
     private MusicController controller;
 
     private final static int MY_PERMISSION_REQUEST_READ_EXTERNAL_STORAGE = 0;
-    private final static int MY_PERMISSION_REQUEST_WAKE_LOCK = 1;
 
     private ServiceConnection musicConnection = new ServiceConnection() {
+
+        /*
+        Serveice Connection for connecting to music player service.
+        It sets the playlist for the service.
+        sets the controller widget for the activity.
+        sets or appends to onPreparedListener for mediaPlayer in the service.
+        */
+
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
             musicSvc = ((MusicService.MusicBinder) service).getService();
@@ -64,8 +70,6 @@ public class MainActivity extends AppCompatActivity
 
                     controller.show();
                     selectSongView(musicSvc.getPlaying());
-
-
                 }
             });
 
@@ -94,15 +98,14 @@ public class MainActivity extends AppCompatActivity
         NavigationView navigationView = (NavigationView) findViewById(R.id.nav_view);
         navigationView.setNavigationItemSelectedListener(this);
 
-        songView = (ListView) findViewById(R.id.song_list);
+        songView = (RecyclerView) findViewById(R.id.song_list);
         songList = new ArrayList<SongMeta>();
 
-        if(checkSelfPermission(Manifest.permission.WAKE_LOCK)
-                != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.WAKE_LOCK},
-                    MY_PERMISSION_REQUEST_WAKE_LOCK);
-        }
-
+        /*
+        Request to permission to load from external sd card.
+        Add songs from external sd card if already granted.
+        Prepare code in onRequestPermissionResult.
+        */
         if(checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
                 != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE},
@@ -119,6 +122,8 @@ public class MainActivity extends AppCompatActivity
         });
 
         SongAdapter songAdpt = new SongAdapter(this, songList);
+
+        songView.setLayoutManager(new LinearLayoutManager(this));
         songView.setAdapter(songAdpt);
     }
 
@@ -126,16 +131,16 @@ public class MainActivity extends AppCompatActivity
     public void onStart() {
         super.onStart();
 
+        //Bind to/Create music player service.
+
         if(playIntent == null) {
             playIntent = new Intent(this, MusicService.class);
             bindService(playIntent, musicConnection, Context.BIND_AUTO_CREATE);
-            //startService(playIntent);
         }
     }
 
     @Override
     protected void onDestroy() {
-        //stopService(playIntent);
         unbindService(musicConnection);
         musicSvc = null;
         super.onDestroy();
@@ -146,6 +151,8 @@ public class MainActivity extends AppCompatActivity
         if(requestCode == MY_PERMISSION_REQUEST_READ_EXTERNAL_STORAGE
                 && grantResults.length > 0
                 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+
+            //External sd card access granted, add songs from sd card to songList.
 
             addToSongList(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI);
 
@@ -161,23 +168,23 @@ public class MainActivity extends AppCompatActivity
     }
 
     public void selectSongView(int pos) {
-        SongAdapter adpt = (SongAdapter) songView.getAdapter();
-        int priorSelected = adpt.getSelected();
-        adpt.setSelected(pos);
+        SongAdapter adapter = (SongAdapter) songView.getAdapter();
+        try{
+            songView.getLayoutManager().findViewByPosition(adapter.getSelected()).setBackgroundColor(0);
+        } catch(Exception e) {
+            Log.d("Select Song View", "Previous view not exits or out of focus.");
+        }
+        adapter.setSelected(pos);
+        try{
+            songView.getLayoutManager().findViewByPosition(pos).setBackgroundColor(Color.DKGRAY);
+        } catch(Exception e) {
+            Log.d("Select Song View", "Selected view not exits or out of focus.");
+        }
 
-        int firstVisiblePosition = songView.getFirstVisiblePosition();
-        int targetVisiblePosition = priorSelected - firstVisiblePosition;
-        if(targetVisiblePosition >= 0 && targetVisiblePosition < songView.getChildCount())
-            songView.getChildAt(targetVisiblePosition).setBackgroundColor(0);
-
-        targetVisiblePosition = pos - firstVisiblePosition;
-        if(targetVisiblePosition >= 0 && targetVisiblePosition < songView.getChildCount())
-            songView.getChildAt(targetVisiblePosition).setBackgroundColor(Color.DKGRAY);
     }
 
     public void selectSong(View view) {
         int selectIndex = (int) view.getTag();
-        selectSongView(selectIndex);
         musicSvc.setSong(selectIndex);
         musicSvc.playSong();
     }
